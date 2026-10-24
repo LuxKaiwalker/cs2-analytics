@@ -115,6 +115,11 @@ class AwpyParser:
 
     name = "awpy"
 
+    def __init__(self) -> None:
+        #: Rows discarded during normalization, by dataset, so they can be reported
+        #: rather than silently lost.
+        self._dropped: dict[str, int] = {}
+
     def version(self) -> str:
         import awpy
 
@@ -158,6 +163,7 @@ class AwpyParser:
         side_lookup = {(entry.round_num, entry.player_key): entry.side for entry in roster}
 
         # --- combat ----------------------------------------------------------
+        self._dropped = {}
         kills = self._kills(frames.get("kills"), locator, registry, side_lookup)
         damages = apply_damage_caps(
             self._damages(frames.get("damages"), locator, registry, side_lookup)
@@ -167,6 +173,7 @@ class AwpyParser:
         objectives = self._objectives(frames.get("bomb"), locator, registry, side_lookup)
 
         self._note_missing_thrower(frames.get("shots"), availability)
+        self._note_warmup(anomalies)
         team_names = self._team_names(frames.get("players"), teams, registry)
 
         meta = MatchMeta(
@@ -559,7 +566,9 @@ class AwpyParser:
             round_num = locator.round_for(tick) if tick is not None else None
             victim = self._player(registry, row.get("victim_steamid"), row.get("victim_name"))
             if tick is None or round_num is None or victim is None:
-                continue  # warmup, or a row with no identifiable victim
+                # Warmup (before the first recorded round), or no identifiable victim.
+                self._dropped["kills"] = self._dropped.get("kills", 0) + 1
+                continue
             attacker = self._player(registry, row.get("attacker_steamid"), row.get("attacker_name"))
             assister = self._player(registry, row.get("assister_steamid"), row.get("assister_name"))
             out.append(
@@ -752,6 +761,30 @@ class AwpyParser:
                 )
             )
         return out
+
+    def _note_warmup(self, anomalies: list[Anomaly]) -> None:
+        """Report events that fell outside every round instead of dropping them silently.
+
+        A knife round is often played *before* the first round the demo records, so its
+        kills sit before round 1's start tick and belong to no round. Excluding them from
+        the statistics is correct — they are not part of the match — but doing it without
+        saying so would leave the user wondering why a scoreboard disagrees with what they
+        remember watching.
+        """
+        total = sum(self._dropped.values())
+        if not total:
+            return
+        anomalies.append(
+            Anomaly(
+                code="pre_match_events_excluded",
+                message=(
+                    f"{total} event(s) occurred before the first recorded round and were "
+                    "excluded from all statistics. This is normal for a warmup or a knife "
+                    "round played before the match proper."
+                ),
+                context={"counts": dict(self._dropped)},
+            )
+        )
 
     def _note_missing_thrower(self, frame: pl.DataFrame | None, availability: Availability) -> None:
         """Downgrade ``shots`` to PARTIAL when throws carry no owner.

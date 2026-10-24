@@ -16,6 +16,12 @@ UTILITY_DAMAGE_WEAPONS = frozenset({"hegrenade", "inferno", "molotov", "incgrena
 #: Weapon strings that represent a flashbang throw, in the *throw* table.
 FLASH_WEAPONS = frozenset({"flashbang"})
 
+#: Grenades that can appear in the damage table but are deliberately **not** utility
+#: damage. A smoke or decoy that strikes a player directly deals a point or two of impact
+#: damage; counting it would not match any published scoreboard's "utility damage", which
+#: means HE and fire. Listed explicitly so the unknown-weapon check does not flag them.
+NON_DAMAGING_UTILITY = frozenset({"smokegrenade", "decoy", "flashbang"})
+
 #: Largest clutch bucket reported; 1vN beyond this is clamped into it.
 MAX_CLUTCH_OPPONENTS = 5
 

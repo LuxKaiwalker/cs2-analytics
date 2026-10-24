@@ -38,6 +38,7 @@ class Fixture:
     source: str
     result: str | None
     notes: str | None
+    match_url: str | None
     ground_truth: dict[str, Any] | None
 
     @classmethod
@@ -52,6 +53,7 @@ class Fixture:
             source=entry.get("source", ""),
             result=entry.get("result"),
             notes=entry.get("notes"),
+            match_url=entry.get("match_url"),
             ground_truth=entry.get("ground_truth"),
         )
 

@@ -6,13 +6,17 @@
  * megabytes is simply kinder than letting the upload finish and then rejecting it.
  */
 
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { ApiError, api } from '../api/client'
 import { Button, Panel } from './ui/primitives'
 import { formatBytes } from '../lib/format'
 
-/** Mirrors the server default (`CS2A_MAX_DEMO_BYTES`); the server remains authoritative. */
-const MAX_BYTES = 400 * 1024 * 1024
+/**
+ * Fallback only. The real limit is read from the server, so raising
+ * `CS2A_MAX_DEMO_BYTES` takes effect in the UI without a rebuild and the client can
+ * never reject a file the server would have accepted.
+ */
+const FALLBACK_MAX_BYTES = 600 * 1024 * 1024
 const MIN_BYTES = 64 * 1024
 
 type Mode = 'file' | 'url'
@@ -28,8 +32,25 @@ export function UploadPanel({ onAccepted }: Props) {
   const [error, setError] = useState<{ code: string; message: string } | null>(null)
   const [url, setUrl] = useState('')
   const [busy, setBusy] = useState(false)
+  const [maxBytes, setMaxBytes] = useState(FALLBACK_MAX_BYTES)
   const inputRef = useRef<HTMLInputElement>(null)
   const abortRef = useRef<AbortController | null>(null)
+
+  useEffect(() => {
+    let active = true
+    api
+      .health()
+      .then((health) => {
+        if (active && health.max_demo_bytes > 0) setMaxBytes(health.max_demo_bytes)
+      })
+      .catch(() => {
+        // The fallback is only used to give a friendlier message; the server still
+        // enforces the real limit.
+      })
+    return () => {
+      active = false
+    }
+  }, [])
 
   const reject = useCallback((code: string, message: string) => {
     setError({ code, message })
@@ -47,10 +68,10 @@ export function UploadPanel({ onAccepted }: Props) {
         )
         return
       }
-      if (file.size > MAX_BYTES) {
+      if (file.size > maxBytes) {
         reject(
           'file_too_large',
-          `That demo is ${formatBytes(file.size)}, over the ${formatBytes(MAX_BYTES)} limit.`,
+          `That demo is ${formatBytes(file.size)}, over the ${formatBytes(maxBytes)} limit.`,
         )
         return
       }
@@ -83,7 +104,7 @@ export function UploadPanel({ onAccepted }: Props) {
         }
       }
     },
-    [onAccepted, reject],
+    [onAccepted, reject, maxBytes],
   )
 
   const submitUrl = useCallback(async () => {
@@ -214,7 +235,7 @@ export function UploadPanel({ onAccepted }: Props) {
                   >
                     choose a file
                   </button>{' '}
-                  · up to {formatBytes(MAX_BYTES)}
+                  · up to {formatBytes(maxBytes)}
                 </p>
               </>
             )}

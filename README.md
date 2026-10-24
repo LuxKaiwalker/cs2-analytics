@@ -114,10 +114,20 @@ implicitly. To fetch it (84 MB, checksum-verified, gitignored):
 .venv/bin/python -m app.cli fetch-fixture
 ```
 
-That fixture is a public Valve matchmaking match whose manifest carries a published
-csstats.gg scoreboard, so the integration test checks our numbers against **two
-independent oracles**: the parser's own aggregation (exact match required) and a
-third-party scoreboard (per-metric tolerances with documented divergences).
+`fetch-fixture` without `--name` takes the smallest. **The integration suite is
+parameterized over whatever fixtures are present**, so downloading another extends
+coverage without touching a test:
+
+| Fixture | Size | What it adds |
+|---|---|---|
+| `valve-de_mirage-472514809` | 84 MB | 13–0, one side swap, csstats.gg scoreboard |
+| `faceit-de_mirage-6de46e85` | 438 MB | **Overtime** (16–14, swaps at 13 and 28), pre-match knife round |
+| `esea-de_dust2-2c5bdd12` | 408 MB | **Second map** (validates the de_dust2 radar transform), a **coach** who never spawns, blind-derived flash assists |
+
+Each fixture's manifest carries a published scoreboard, so the integration test checks our
+numbers against **two independent oracles**: the parser's own aggregation (exact match
+required) and the platform's own scoreboard (per-metric tolerances, with every divergence
+documented rather than absorbed).
 
 There is also a real-browser smoke test that uploads a demo through the UI and walks every
 tab, failing on a console error or a missing element:
@@ -183,8 +193,10 @@ to a network requires adding authentication and authorization first. See
 
 ## Known limitations
 
-- The real-demo test fixture is a 13-0 match. It *does* exercise the halftime side swap,
-  but **overtime and knife rounds are covered only by synthetic fixtures**.
+- Overtime, side swaps, a second map, a never-spawning coach and pre-match knife rounds
+  are all covered by real demos. A knife round recorded *inside* the round table (rather
+  than before round 1) is still **synthetic-fixture-only** — none of the three published
+  fixtures contains one.
 - Kills and damage use different weapon names for the same gun (the R8's damage is reported
   as `deagle`, its kills as `revolver`). No statistic depends on this; the event table
   shows what the demo said.

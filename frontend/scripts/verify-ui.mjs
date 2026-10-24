@@ -146,10 +146,40 @@ try {
     trs.map((tr) => [...tr.querySelectorAll('td')].map((td) => td.textContent.trim())),
   )
   check('scoreboard has rows', rows.length > 0, `${rows.length} rows`)
-  check('top row is the top fragger', rows[0]?.[2] === '27', `kills cell = ${rows[0]?.[2]}`)
+  // Demo-agnostic: assert the ordering property, not a value from one particular match.
+  const killsColumn = rows.map((cells) => Number(cells[2]))
   check(
-    'unknown metrics render as an em dash, not 0',
-    rows.some((cells) => cells.includes('—')),
+    'scoreboard is sorted by kills, descending',
+    killsColumn.every((value, i) => i === 0 || killsColumn[i - 1] >= value),
+    killsColumn.join(','),
+  )
+  // Whether anything is unknown depends on the match, so check the table against what
+  // the API actually returned rather than assuming a dash must be present.
+  const matchId = page.url().match(/\/matches\/([a-f0-9]+)/)?.[1]
+  const apiPlayers = await page.evaluate(
+    async (id) => (await fetch(`/api/players-probe-${id}`)).ok,
+    matchId,
+  ).catch(() => false)
+  void apiPlayers
+  const nullCells = await page.evaluate(async (id) => {
+    const response = await fetch(`/api/matches/${id}/players`)
+    const players = await response.json()
+    const shown = ['kd', 'kpr', 'adr', 'headshot_pct', 'kast', 'utility_damage', 'enemies_flashed']
+    return players.reduce(
+      (total, player) => total + shown.filter((key) => player[key] === null).length,
+      0,
+    )
+  }, matchId)
+  const dashes = rows.reduce(
+    (total, cells) => total + cells.filter((cell) => cell === '—').length,
+    0,
+  )
+  check(
+    nullCells > 0
+      ? 'every unknown metric renders as an em dash, not 0'
+      : 'no unknown metrics in this match, and none shown as a dash',
+    dashes === nullCells,
+    `${nullCells} nulls from the API, ${dashes} dashes in the table`,
   )
 
   // Map tab: the radar image must actually load, and marks must be drawn.
@@ -201,9 +231,13 @@ try {
 
   // --- console ------------------------------------------------------------
   console.log('\nconsole')
-  // React's dev-only act() warnings and the favicon 404 are noise; anything else is not.
+  // Filtered, with reasons:
+  //  - favicon / React DevTools: environment noise, not the app.
+  //  - 409 Conflict: re-running this script against a server that already holds the demo
+  //    exercises the duplicate path, which the app handles by opening the existing match.
+  //    The browser logs every failed HTTP status as a console error regardless.
   const real = consoleErrors.filter(
-    (text) => !/favicon|Download the React DevTools/i.test(text),
+    (text) => !/favicon|Download the React DevTools|status of 409/i.test(text),
   )
   check('no console errors', real.length === 0, real.slice(0, 3).join(' | '))
 } finally {

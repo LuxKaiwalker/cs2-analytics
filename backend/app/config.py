@@ -32,7 +32,7 @@ class Settings(BaseSettings):
     data_dir: Path = Field(default=_REPO_ROOT / "data")
 
     # --- Upload limits -------------------------------------------------------
-    max_demo_bytes: int = Field(default=400 * MIB, gt=0)
+    max_demo_bytes: int = Field(default=600 * MIB, gt=0)
     min_demo_bytes: int = Field(default=64 * 1024, ge=0)
     max_total_bytes: int = Field(default=20 * 1024 * MIB, gt=0)
 

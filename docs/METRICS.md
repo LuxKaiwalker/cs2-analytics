@@ -18,14 +18,21 @@ not by the rounds a particular player was present for. That is the convention ev
 public scoreboard uses, and it understates a mid-match substitute. The rounds a player
 was actually present for are reported separately as `rounds_present`.
 
+**A player who never took the field has no rates at all.** League demos give a coach a
+player slot that never spawns. Dividing by the match's rounds would report a confident
+`0.0` ADR and KAST for someone with no basis for a rate — so when a player has no rounds
+present, no kills, no deaths, no assists and no damage, their rates are `null`. (One of
+our reference demos contains such a coach, whom upstream instead credits with every round
+and **100% KAST**, for never dying in rounds they never played.)
+
 ## Combat
 
 | Metric | Definition |
 |---|---|
 | `kills` | Enemy kills. Suicides, world deaths and team kills are excluded and counted separately as `self_kills` / `team_kills`. |
 | `deaths` | Every death, **including** suicides and world deaths. |
-| `assists` | Kill assists credited by the game, **excluding** flash assists. |
-| `flash_assists` | Assists where the player's flashbang set up the kill. |
+| `assists` | Kill assists, **excluding** flash assists. |
+| `flash_assists` | Assists where the player's flashbang set up the kill. See below — this is not simply a column read. |
 | `kd` | `kills / deaths`. **`null` when the player has no deaths** — the ratio is undefined, not infinite and not zero. |
 | `kpr` | `kills / scored rounds`. |
 | `headshot_kills` | Kills whose fatal hit was to the head. |
@@ -41,6 +48,27 @@ are on opposite sides. The order of these checks matters: **a suicide is tested 
 team kill**, because a suicide trivially shares the victim's side and would otherwise be
 miscounted as a team kill. The reference demo ends with five post-match world suicides,
 all of which would have been reported as team kills under the naive ordering.
+
+### Assists
+
+A player is credited with an assist from either of two sources, and **at most one per
+kill**:
+
+1. **The assister the game recorded**, when they are an enemy of the victim and are
+   neither the victim nor the player who got the kill.
+2. **Any enemy whose flashbang blind was still active on the victim at the moment of the
+   kill.** The game does not always record such a player as the assister, but they
+   demonstrably set the kill up.
+
+The second source is why assists are not a column read. On two of our three reference
+demos the recorded assister is the whole story; on the third it misses **six flash
+assists across two players**, and the KAST credit that goes with them. When a player
+qualifies through both routes the assist is counted once, as a flash assist — flash
+assists are a subset of assists, not a separate tally.
+
+Assists are **not** gated on the kill being a valid enemy kill. A player who takes enemy
+damage and then falls to their death is recorded as a suicide, but the enemy the game
+credited still contributed to it, and real demos contain exactly that.
 
 ## Damage
 
@@ -157,6 +185,18 @@ would be misleading. `GET /api/metrics` returns this as an explicit `omitted` en
 absence reads as a decision rather than an oversight. A rating will only be added if an
 actual documented formula is implemented and stated with its version.
 
+## Pre-match events
+
+A knife round is frequently played *before* the round a demo starts recording, so its
+kills sit before round 1's start tick and belong to no round at all — they are not
+flagged `is_knife_round`, because they are not in the round table to be flagged. Two of
+our three reference demos are like this.
+
+Those events are excluded from every statistic, which is correct: they are not part of the
+match. But the exclusion is **reported** as a `pre_match_events_excluded` anomaly and shown
+in the UI, because silently dropping eight kills would leave a user unable to explain why
+the scoreboard disagrees with what they watched.
+
 ## Known limitations
 
 - **Kills and damage use different weapon vocabularies.** CS2 reports damage under a base
@@ -174,8 +214,11 @@ actual documented formula is implemented and stated with its version.
 - **Tick rate can be assumed.** When a demo omits playback timing the parser falls back to
   64, which would skew the tick-expressed trade window. The provenance is recorded as
   `tick_rate_source` and surfaced in the UI.
-- **The radar transform ignores `rotate` and `zoom`.** A few maps (de_dust2, cs_italy,
-  ar_baggage) carry non-zero values inherited from the old radar metadata format. The
-  reference plotting implementation ignores them and uses `pos_x`/`pos_y`/`scale` alone,
-  and its output is known-good, so this build does the same rather than apply a transform
-  it has never verified. Verified visually on de_mirage, whose values are the identity.
+- **The radar transform ignores `rotate` and `zoom`.** A few maps carry non-zero values
+  inherited from the old radar metadata format — de_dust2 declares `rotate=1.0,
+  zoom=1.1`. The reference plotting implementation ignores them and uses
+  `pos_x`/`pos_y`/`scale` alone, so this build does the same. This is now **verified
+  rather than assumed**: an integration test projects every death position from a real
+  de_dust2 match and asserts that ≥98% land inside the radar image and that they span the
+  playable area. Ignoring those fields is therefore correct for de_dust2; the other maps
+  that declare them (cs_italy, ar_baggage) remain untested.

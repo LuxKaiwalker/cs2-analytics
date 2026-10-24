@@ -16,12 +16,14 @@ from app.analytics.constants import (
     MAX_CLUTCH_OPPONENTS,
     MAX_MULTIKILL,
     MIN_MULTIKILL,
+    NON_DAMAGING_UTILITY,
     UTILITY_DAMAGE_WEAPONS,
 )
 from app.analytics.round_state import Clutch, RoundState, build_round_states, rounds_present
 from app.analytics.trades import TradeResult, detect_trades
 from app.parsing.model import (
     Anomaly,
+    BlindNorm,
     DamageNorm,
     KillNorm,
     NormalizedMatch,
@@ -173,13 +175,14 @@ def compute(match: NormalizedMatch) -> MatchAnalytics:
     flash_available = match.is_available("blinds")
     throws_available = match.is_available("shots")
 
-    kills_by_player, deaths_by_player, assist_counts = _combat_counts(match, scored_rounds)
+    credits = assist_credits(match)
+    kills_by_player, deaths_by_player, assist_counts = _combat_counts(match, scored_rounds, credits)
     damage_by_player, utility_by_player = _damage_counts(match, scored_rounds)
     openings = _openings(match, scored_rounds)
     multikills = _multikills(match, scored_rounds)
     flash_stats = _flash_counts(match, scored_rounds)
     throws = _throw_counts(match, scored_rounds)
-    kast_rounds = _kast_rounds(match, states, trades, scored_rounds)
+    kast_rounds = _kast_rounds(match, states, trades, scored_rounds, credits)
     clutches = _clutches(states, scored_rounds)
     present = rounds_present(match)
 
@@ -224,6 +227,19 @@ def compute(match: NormalizedMatch) -> MatchAnalytics:
                 round(flash_stats.duration.get(key, 0.0), 3) if flash_available else None
             ),
         )
+        if _never_played(stats):
+            # Someone who was in the server but never took the field — a league coach
+            # occupies a player slot and never spawns. Rates over the match's round count
+            # would read as a confident 0.0 for a player with no basis for a rate at all,
+            # which is exactly the "unknown is not zero" case. (Upstream instead credits
+            # them every round and 100% KAST for "surviving" rounds they never played.)
+            #
+            # The test is participation, not roster presence alone: a demo whose roster
+            # could not be reconstructed still has players, and their damage proves it.
+            stats.kast = None
+            stats.adr = None
+            stats.kpr = None
+
         for n in range(MIN_MULTIKILL, MAX_MULTIKILL + 1):
             setattr(stats, f"multikill_{n}k", multikills.get(key, {}).get(n, 0))
         clutch = clutches.get(key)
@@ -234,7 +250,7 @@ def compute(match: NormalizedMatch) -> MatchAnalytics:
                 setattr(stats, f"clutch_1v{n}", clutch.by_opponents.get(n, 0))
         players.append(stats)
 
-    rounds = _round_summaries(match, states, scored_rounds)
+    rounds = _round_summaries(match, states, scored_rounds, credits)
     team_a, team_b = match.team_score("A"), match.team_score("B")
     winner: Team | None = None
     if team_a != team_b:
@@ -263,6 +279,17 @@ def _safe_ratio(numerator: float, denominator: float) -> float | None:
     if not denominator:
         return None
     return round(numerator / denominator, 4)
+
+
+def _never_played(stats: PlayerStats) -> bool:
+    """Whether a player shows no evidence of having taken the field at all."""
+    return (
+        stats.rounds_present == 0
+        and stats.kills == 0
+        and stats.deaths == 0
+        and stats.assists == 0
+        and not stats.damage_total
+    )
 
 
 def participant_keys(match: NormalizedMatch) -> set[str]:
@@ -307,14 +334,14 @@ def _warn_unknown_weapons(match: NormalizedMatch, anomalies: list[Anomaly]) -> N
     stop counting toward utility damage with no indication anything was missed, so it is
     surfaced as a warning rather than discovered later.
     """
-    known_guns_seen: set[str] = set()
+    seen: set[str] = set()
     for damage in match.damages:
         if damage.weapon is None:
             continue
-        if damage.weapon in UTILITY_DAMAGE_WEAPONS:
+        if damage.weapon in UTILITY_DAMAGE_WEAPONS or damage.weapon in NON_DAMAGING_UTILITY:
             continue
-        known_guns_seen.add(damage.weapon)
-    suspicious = {w for w in known_guns_seen if "nade" in w or "molo" in w or "fire" in w}
+        seen.add(damage.weapon)
+    suspicious = {w for w in seen if "nade" in w or "molo" in w or "fire" in w or "burn" in w}
     if suspicious:
         anomalies.append(
             Anomaly(
@@ -328,8 +355,70 @@ def _warn_unknown_weapons(match: NormalizedMatch, anomalies: list[Anomaly]) -> N
         )
 
 
+@dataclass(frozen=True, slots=True)
+class AssistCredit:
+    """One assist credited to one player for one kill."""
+
+    kill_index: int
+    player_key: str
+    is_flash: bool
+
+
+def assist_credits(match: NormalizedMatch) -> list[AssistCredit]:
+    """Every assist credited across the match.
+
+    An assist comes from either of two sources, and a player gets **at most one per
+    kill**:
+
+    1. The assister the game recorded, when they are an enemy of the victim and are
+       neither the victim nor the player who got the kill.
+    2. Any enemy who had a flashbang blind **still active on the victim at the moment of
+       the kill**. The game does not always record such a player as the assister, but
+       they demonstrably set the kill up.
+
+    The second source is why this is not simply a column read. On two of our three
+    reference demos the recorded assister is the whole story; on the third it misses six
+    flash assists across two players, which also costs them KAST credit.
+
+    When a player qualifies through both routes the assist is counted once, as a flash
+    assist — flash assists are a subset of assists, not a separate tally.
+    """
+    rate = match.meta.tick_rate or 64.0
+
+    # Blinds indexed by victim so each kill only scans that victim's flashes.
+    blinds_by_victim: dict[str, list[BlindNorm]] = defaultdict(list)
+    for blind in match.blinds:
+        blinds_by_victim[blind.victim.key].append(blind)
+
+    credits: list[AssistCredit] = []
+    for index, kill in enumerate(match.kills):
+        per_kill: dict[str, bool] = {}
+
+        if kill.is_valid_assist and kill.assister is not None:
+            per_kill[kill.assister.key] = kill.assist_is_flash
+
+        killer_key = kill.attacker.key if kill.attacker is not None else None
+        for blind in blinds_by_victim.get(kill.victim.key, ()):
+            flasher = blind.attacker
+            if flasher is None or not blind.is_enemy_flash:
+                continue
+            if flasher.key == kill.victim.key or flasher.key == killer_key:
+                continue
+            if blind.round_num != kill.round_num:
+                continue
+            if not (blind.tick <= kill.tick <= blind.tick + blind.duration * rate):
+                continue
+            per_kill[flasher.key] = True
+
+        credits.extend(
+            AssistCredit(kill_index=index, player_key=key, is_flash=is_flash)
+            for key, is_flash in per_kill.items()
+        )
+    return credits
+
+
 def _combat_counts(
-    match: NormalizedMatch, scored: set[int]
+    match: NormalizedMatch, scored: set[int], credits: list[AssistCredit]
 ) -> tuple[dict[str, int], dict[str, int], dict[str, dict[str, int]]]:
     kills: dict[str, int] = defaultdict(int)
     deaths: dict[str, int] = defaultdict(int)
@@ -340,9 +429,10 @@ def _combat_counts(
         deaths[kill.victim.key] += 1
         if kill.is_valid_kill and kill.attacker is not None:
             kills[kill.attacker.key] += 1
-        if kill.assister is not None and kill.is_valid_kill:
-            bucket = "flash" if kill.assist_is_flash else "kill"
-            assists[bucket][kill.assister.key] += 1
+    for credit in credits:
+        if match.kills[credit.kill_index].round_num not in scored:
+            continue
+        assists["flash" if credit.is_flash else "kill"][credit.player_key] += 1
     return dict(kills), dict(deaths), {k: dict(v) for k, v in assists.items()}
 
 
@@ -459,6 +549,7 @@ def _kast_rounds(
     states: dict[int, RoundState],
     trades: TradeResult,
     scored: set[int],
+    credits: list[AssistCredit],
 ) -> dict[str, set[int]]:
     """Which scored rounds each player earned a KAST credit in."""
     traded_pairs: set[tuple[int, str]] = set()
@@ -472,8 +563,10 @@ def _kast_rounds(
             continue
         if kill.is_valid_kill and kill.attacker is not None:
             credit[kill.attacker.key].add(kill.round_num)
-        if kill.assister is not None and kill.is_valid_kill:
-            credit[kill.assister.key].add(kill.round_num)
+    for assist in credits:
+        assisted = match.kills[assist.kill_index]
+        if assisted.round_num in scored:
+            credit[assist.player_key].add(assisted.round_num)
     for round_num, player_key in traded_pairs:
         if round_num in scored:
             credit[player_key].add(round_num)
@@ -513,6 +606,7 @@ def _round_summaries(
     match: NormalizedMatch,
     states: dict[int, RoundState],
     scored: set[int],
+    credits: list[AssistCredit],
 ) -> list[RoundSummary]:
     teams = {entry.player_key: entry.team for entry in match.roster}
     equipment = {
@@ -533,6 +627,13 @@ def _round_summaries(
         for state in states.values()
         if state.clutch is not None
     }
+
+    # Assists per (round, player), from the same credits the scoreboard uses, so a round
+    # row can never disagree with the match total it rolls up into.
+    assists_by_round: dict[int, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    for credit in credits:
+        assisted = match.kills[credit.kill_index]
+        assists_by_round[assisted.round_num][credit.player_key] += 1
 
     summaries: list[RoundSummary] = []
     score_a = score_b = 0
@@ -558,6 +659,7 @@ def _round_summaries(
             teams,
             equipment,
             clutch_lookup,
+            dict(assists_by_round.get(round_.round_num, {})),
         )
         summaries.append(
             RoundSummary(
@@ -601,6 +703,7 @@ def _round_players(
     teams: dict[str, Team | None],
     equipment: dict[tuple[int, str], int | None],
     clutch_lookup: dict[tuple[int, str], Clutch],
+    round_assists: dict[str, int],
 ) -> list[RoundPlayerStats]:
     round_num = round_.round_num
     rows: dict[str, RoundPlayerStats] = {}
@@ -630,8 +733,11 @@ def _round_players(
         if kill.is_valid_kill and kill.attacker is not None:
             attacker = ensure(kill.attacker.key, kill.attacker, kill.attacker_side)
             attacker.kills += 1
-        if kill.assister is not None and kill.is_valid_kill:
-            ensure(kill.assister.key, kill.assister, kill.assister_side).assists += 1
+    for key, count in round_assists.items():
+        if key in rows:
+            rows[key].assists = count
+        else:
+            ensure(key, match.players.get(key), None).assists = count
 
     for damage in damages:
         if not damage.is_valid_damage or damage.attacker is None:

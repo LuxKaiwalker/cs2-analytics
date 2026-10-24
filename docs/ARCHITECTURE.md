@@ -24,9 +24,20 @@ Three independent reasons, any one of which would be sufficient:
 - **Isolation.** The input is an untrusted binary file by design. A malformed demo that
   aborts inside the native parser takes down only the worker.
 
-A fourth, measured benefit: the child's memory returns to the OS when it exits. Parsing
-peaks at roughly **2.3× the demo's size** (213 MB for an 84 MB demo), which is what the
-upload cap is derived from.
+A fourth, measured benefit: the child's memory returns to the OS when it exits.
+
+Measured peak RSS, which is where the upload cap comes from:
+
+| Demo | Size | Parse | Peak RSS | Ratio |
+|---|---|---|---|---|
+| valve de_mirage | 84 MB | 1.3 s | 213 MB | 2.5× |
+| esea de_dust2 | 408 MB | 21 s | 528 MB | 1.3× |
+| faceit de_mirage | 438 MB | 22 s | 567 MB | 1.3× |
+
+The ratio *falls* with size — the small demo's figure is dominated by fixed interpreter
+and library overhead. Extrapolating the small demo's 2.5× would have set the cap far
+lower than the data supports, which is why it is set from the large-demo measurement
+(600 MiB → roughly 800 MB RSS).
 
 The context is `spawn`, never `fork` — forking a process that owns an event loop, a
 connection pool and open SQLite handles duplicates all of them into the child.

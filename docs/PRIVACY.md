@@ -54,7 +54,7 @@ Demos are treated as untrusted binary input, because they are.
 - **Validated by content**, not by filename: the leading bytes must be the CS2 demo
   signature. A CS:GO demo, a compressed demo and a renamed JPEG are each rejected with a
   message saying which.
-- **Size-capped while streaming** (`CS2A_MAX_DEMO_BYTES`, default 400 MiB), with the
+- **Size-capped while streaming** (`CS2A_MAX_DEMO_BYTES`, default 600 MiB), with the
   partial file deleted the moment the cap is exceeded. A disk budget
   (`CS2A_MAX_TOTAL_BYTES`) and a free-space check refuse uploads there is no room for.
 - **Stored under generated UUIDs.** The client-supplied filename is kept for display only

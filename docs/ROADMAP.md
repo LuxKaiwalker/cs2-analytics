@@ -88,9 +88,10 @@ product actually spans matches, not before. The index makes it cheap to add late
 
 ## Near-term, highest value
 
-1. **A second real demo fixture with a longer scoreline.** The current one is a 13-0 that
-   does contain the halftime swap, but overtime and knife rounds are covered only by
-   synthetic fixtures.
+1. **A knife round recorded inside the round table.** Three real fixtures now cover
+   overtime, side swaps, a second map, a coach who never spawns and pre-match knife
+   rounds. The one path still exercised only by synthetic fixtures is a knife round that
+   appears *in* the round table with `is_knife_round` set.
 2. **Per-round behavioural primitives** — trade conversion rate, opening-duel win rate by
    map area, utility timing relative to round start. All computable from stored data.
 3. **Cross-match aggregation** over `player_key`, which turns a single report into a trend

@@ -64,7 +64,7 @@ describe('UploadPanel', () => {
     expect(onAccepted).not.toHaveBeenCalled()
   })
 
-  it('rejects a file over the size limit without uploading it', async () => {
+  it('rejects a file over the server-reported size limit without uploading it', async () => {
     const sent = vi.fn()
     vi.stubGlobal(
       'XMLHttpRequest',
@@ -81,7 +81,7 @@ describe('UploadPanel', () => {
 
     await userEvent.upload(
       screen.getByLabelText('Choose a CS2 demo file'),
-      fakeDemoFile('huge.dem', 900 * 1024 * 1024),
+      fakeDemoFile('huge.dem', 1200 * 1024 * 1024),
     )
 
     expect(await screen.findByRole('alert')).toHaveTextContent(/over the/i)
@@ -172,5 +172,37 @@ describe('UploadPanel', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Import' }))
 
     expect(await screen.findByRole('alert')).toHaveTextContent(/private address/i)
+  })
+})
+
+describe('UploadPanel size limit', () => {
+  it('uses the limit the server reports rather than a hardcoded one', async () => {
+    // A client-side constant would drift from CS2A_MAX_DEMO_BYTES and could reject a
+    // file the server would happily accept.
+    server.use(
+      http.get('/api/health', () =>
+        HttpResponse.json({
+          status: 'ok',
+          database: true,
+          worker_alive: true,
+          queue_depth: 0,
+          processing_match_id: null,
+          disk_free_bytes: 10_000_000_000,
+          demo_bytes_stored: 0,
+          max_demo_bytes: 50 * 1024 * 1024,
+          parser: 'awpy',
+          parser_version: '3.1.1',
+          schema_version: 1,
+        }),
+      ),
+    )
+    renderWithRouter(<UploadPanel onAccepted={vi.fn()} />)
+    await screen.findByText(/up to 50\.0 MB/i)
+
+    await userEvent.upload(
+      screen.getByLabelText('Choose a CS2 demo file'),
+      fakeDemoFile('big.dem', 80 * 1024 * 1024),
+    )
+    expect(await screen.findByRole('alert')).toHaveTextContent(/over the 50\.0 MB limit/i)
   })
 })

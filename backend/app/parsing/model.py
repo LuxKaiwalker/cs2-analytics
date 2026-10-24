@@ -218,6 +218,28 @@ class KillNorm:
         """An enemy kill: the only kind that counts toward ``kills``."""
         return not self.is_self_kill and not self.is_team_kill and self.attacker is not None
 
+    @property
+    def is_valid_assist(self) -> bool:
+        """Whether the recorded assister should be credited.
+
+        Deliberately **not** gated on :attr:`is_valid_kill`. A player who takes enemy
+        damage and then falls to their death is recorded as a suicide, but the enemy the
+        game credited still contributed to it — and real demos contain exactly that. The
+        requirement is that the assister is an enemy of the victim, and is neither the
+        victim nor the player who got the kill.
+        """
+        if self.assister is None:
+            return False
+        if self.assister.key == self.victim.key:
+            return False
+        if self.attacker is not None and self.assister.key == self.attacker.key:
+            return False
+        return (
+            self.assister_side is not None
+            and self.victim_side is not None
+            and self.assister_side != self.victim_side
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class DamageNorm:

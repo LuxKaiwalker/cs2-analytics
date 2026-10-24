@@ -28,6 +28,22 @@ export function errorBody(code: string, message: string, details?: Record<string
 }
 
 export const handlers = [
+  http.get('/api/health', () =>
+    HttpResponse.json({
+      status: 'ok',
+      database: true,
+      worker_alive: true,
+      queue_depth: 0,
+      processing_match_id: null,
+      disk_free_bytes: 10_000_000_000,
+      demo_bytes_stored: 0,
+      max_demo_bytes: 600 * 1024 * 1024,
+      parser: 'awpy',
+      parser_version: '3.1.1',
+      schema_version: 1,
+    }),
+  ),
+
   http.get('/api/metrics', () => HttpResponse.json(metrics)),
 
   http.get('/api/matches', ({ request }) => {

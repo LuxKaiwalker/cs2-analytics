@@ -219,3 +219,107 @@ def test_every_player_stat_field_has_a_published_definition() -> None:
     assert not undefined, f"metrics without a definition: {undefined}"
     stale = sorted(set(PLAYER_METRICS_BY_KEY) - fields)
     assert not stale, f"definitions with no corresponding metric: {stale}"
+
+
+def test_a_player_who_never_took_the_field_has_unknown_rates() -> None:
+    """League demos give a coach a player slot; they never spawn.
+
+    Reporting 0.0 KAST would be as misleading as the 100% a "never died means survived
+    every round" reading produces. With no eligible rounds the rate is undefined.
+    """
+    ct = [f.player(f"ct{i}") for i in range(1, 6)]
+    t = [f.player(f"t{i}") for i in range(1, 6)]
+    coach = f.player("Coach")
+    rounds = [f.round_(1), f.round_(2)]
+    roster = f.roster_for(rounds, ct, t)
+    # The coach is on the roster every round but never alive at freeze time.
+    roster += [
+        type(roster[0])(
+            round_num=r.round_num,
+            player_key=coach.key,
+            side="CT",
+            team="A",
+            present_at_freeze=False,
+        )
+        for r in rounds
+    ]
+    match = f.match(rounds=rounds, roster=roster, players=[*ct, *t, coach])
+    stats = {p.name: p for p in compute(match).players}
+
+    assert "Coach" in stats, "someone present in the demo should still be listed"
+    assert stats["Coach"].rounds_present == 0
+    assert stats["Coach"].kast is None
+    assert stats["Coach"].adr is None
+    assert stats["Coach"].kpr is None
+    # A player who actually played is unaffected.
+    assert stats["ct1"].kast is not None
+
+
+def test_blind_derived_flash_assists_are_credited() -> None:
+    """A teammate whose flash is still active at the kill assisted it.
+
+    The game does not always record them as the assister, and on one reference demo that
+    omission costs two players six flash assists and the KAST credit that goes with them.
+    """
+    ct = [f.player(f"ct{i}") for i in range(1, 6)]
+    t = [f.player(f"t{i}") for i in range(1, 6)]
+    rounds = [f.round_(1)]
+    # ct2 flashes t1 for 2 seconds; ct1 kills t1 one second later with no recorded assist.
+    blinds = [f.blind(0, 1000, 1, ct[1], t[0], 2.0, attacker_side="CT", victim_side="T")]
+    kills = [f.kill(0, 1064, 1, ct[0], t[0], attacker_side="CT", victim_side="T")]
+    match = f.match(rounds=rounds, roster=f.roster_for(rounds, ct, t), kills=kills, blinds=blinds)
+    stats = {p.name: p for p in compute(match).players}
+
+    assert stats["ct2"].flash_assists == 1
+    assert stats["ct2"].assists == 0, "a flash assist is not also a kill assist"
+    assert stats["ct2"].kast == 100.0, "the assist earns the A in KAST"
+    assert stats["ct1"].flash_assists == 0, "the killer never assists their own kill"
+
+
+def test_an_expired_flash_does_not_earn_an_assist() -> None:
+    ct = [f.player(f"ct{i}") for i in range(1, 6)]
+    t = [f.player(f"t{i}") for i in range(1, 6)]
+    rounds = [f.round_(1)]
+    # The blind lasts 1 second; the kill lands 2 seconds later.
+    blinds = [f.blind(0, 1000, 1, ct[1], t[0], 1.0, attacker_side="CT", victim_side="T")]
+    kills = [f.kill(0, 1128, 1, ct[0], t[0], attacker_side="CT", victim_side="T")]
+    match = f.match(rounds=rounds, roster=f.roster_for(rounds, ct, t), kills=kills, blinds=blinds)
+    stats = {p.name: p for p in compute(match).players}
+    assert stats["ct2"].flash_assists == 0
+
+
+def test_a_team_flash_never_earns_an_assist() -> None:
+    ct = [f.player(f"ct{i}") for i in range(1, 6)]
+    t = [f.player(f"t{i}") for i in range(1, 6)]
+    rounds = [f.round_(1)]
+    # t2 flashes their own teammate t1, who is then killed.
+    blinds = [f.blind(0, 1000, 1, t[1], t[0], 3.0, attacker_side="T", victim_side="T")]
+    kills = [f.kill(0, 1064, 1, ct[0], t[0], attacker_side="CT", victim_side="T")]
+    match = f.match(rounds=rounds, roster=f.roster_for(rounds, ct, t), kills=kills, blinds=blinds)
+    stats = {p.name: p for p in compute(match).players}
+    assert stats["t2"].flash_assists == 0
+
+
+def test_a_player_is_credited_at_most_one_assist_per_kill() -> None:
+    """Recorded assister and active flash are the same credit, not two."""
+    ct = [f.player(f"ct{i}") for i in range(1, 6)]
+    t = [f.player(f"t{i}") for i in range(1, 6)]
+    rounds = [f.round_(1)]
+    blinds = [f.blind(0, 1000, 1, ct[1], t[0], 3.0, attacker_side="CT", victim_side="T")]
+    kills = [
+        f.kill(
+            0,
+            1064,
+            1,
+            ct[0],
+            t[0],
+            attacker_side="CT",
+            victim_side="T",
+            assister=ct[1],
+            assister_side="CT",
+        )
+    ]
+    match = f.match(rounds=rounds, roster=f.roster_for(rounds, ct, t), kills=kills, blinds=blinds)
+    stats = {p.name: p for p in compute(match).players}
+    assert stats["ct2"].flash_assists + stats["ct2"].assists == 1
+    assert stats["ct2"].flash_assists == 1, "the active flash makes it a flash assist"
