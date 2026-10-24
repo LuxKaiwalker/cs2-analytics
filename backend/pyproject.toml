@@ -1,0 +1,80 @@
+# Tool configuration only. The backend is run as a module from this directory
+# (`python -m app.cli`, `uvicorn app.main:app`), not installed as a package, so
+# there is deliberately no [build-system] / [project] table.
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["."]
+
+[tool.ruff.lint]
+select = [
+    "E", "W",    # pycodestyle
+    "F",         # pyflakes
+    "I",         # isort
+    "N",         # pep8-naming
+    "UP",        # pyupgrade
+    "B",         # bugbear
+    "C4",        # comprehensions
+    "SIM",       # simplify
+    "RET",       # return
+    "PTH",       # use pathlib
+    "RUF",
+    "S",         # bandit
+    "DTZ",       # naive datetimes
+    "T20",       # no print outside the CLI
+    "ARG",       # unused arguments
+    "TRY",       # exception antipatterns
+    "BLE",       # blind except — each one must be justified with a noqa
+    "PLC0415",   # import not at top level — deliberate for lazy/parser-local imports
+    "PLR2004",   # magic value comparison
+]
+ignore = [
+    "TRY003",  # long messages outside exception class — we prefer readable raises
+    "TRY400",  # logger.exception vs logger.error — error() is right in some paths
+    "B008",    # function call in default arg — FastAPI Depends/Query idiom
+    "SIM108",  # ternary instead of if-else is not always clearer
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests: asserts are the point, literal expected values are the point, and local
+# imports keep a test's dependencies next to the assertion that needs them.
+"tests/**" = ["S101", "ARG001", "ARG002", "T20", "S311", "PLR2004", "PLC0415"]
+# The parser backends import awpy lazily on purpose: it keeps these modules importable
+# (and the rest of the app unit-testable) without loading the compiled extension.
+"app/parsing/awpy_parser.py" = ["PLC0415"]
+"app/maps/data.py" = ["PLC0415"]
+# The CLI prints by design, and imports each command's dependencies inside the command
+# so `--help` and a mistyped argument do not pay to import the parser, Polars and
+# SQLAlchemy (measured: 0.36s vs several seconds).
+"app/cli.py" = ["T20", "PLC0415"]
+
+[tool.ruff.format]
+line-ending = "lf"
+
+[tool.mypy]
+python_version = "3.11"
+files = ["app"]
+strict = true
+# awpy ships a .pyi for its compiled extension but polars/awpy interop still
+# surfaces Any in places; these keep strict mode usable without blanket ignores.
+warn_return_any = false
+disallow_any_generics = false
+
+[[tool.mypy.overrides]]
+module = ["awpy.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q --strict-markers"
+markers = [
+    "fixture_demo: requires the real CS2 demo fixture (opt-in; see `cli fetch-fixture`)",
+    "slow: takes more than a couple of seconds",
+]
+filterwarnings = [
+    "error::DeprecationWarning",
+    # Starlette's TestClient warns about its own httpx backend, and its deprecation
+    # class is not a DeprecationWarning subclass we can target by module path.
+    "ignore:Using `httpx` with `starlette.testclient`",
+]

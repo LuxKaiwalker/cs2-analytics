@@ -1,0 +1,10 @@
+# Direct runtime dependencies. Regenerate requirements.lock with `make lock`.
+awpy==3.1.1                 # CS2 demo parser (Rust core, Polars output). MIT.
+polars>=2.0,<3              # required by awpy; also used for normalization
+fastapi==0.162.0
+uvicorn[standard]==0.54.0
+pydantic==2.14.1
+pydantic-settings==2.13.0
+SQLAlchemy==2.1.6
+httpx==0.28.1              # SSRF-guarded demo import
+typer>=0.12                # CLI (already an awpy dependency)

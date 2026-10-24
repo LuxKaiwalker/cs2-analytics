@@ -1,0 +1,152 @@
+@import 'tailwindcss';
+
+/*
+ * Design tokens.
+ *
+ * Dark, restrained, competitive. The surfaces are near-neutral with a slight cool
+ * cast so the only saturated colour on screen is data.
+ *
+ * The chart colours are not chosen by eye. They are the validated categorical slots
+ * from the project's data-visualisation palette, checked against this exact panel
+ * surface (#14171c) for lightness band, chroma floor, colour-vision-deficiency
+ * separation and contrast. Team A/B use slots 1 and 2 (worst-pair CVD ΔE 26.8);
+ * the spatial plot's CT/T pair uses slots 1 and 4 and passes all-pairs (ΔE 27.4).
+ * Colour always follows the entity — a team keeps its colour when filters change —
+ * and every chart carries a legend, so identity is never colour-alone.
+ */
+@theme {
+  --color-base: #0d0f12;
+  --color-surface: #14171c;
+  --color-surface-raised: #1b1f26;
+  --color-surface-hover: #22272f;
+  --color-line: #262b33;
+  --color-line-strong: #333a45;
+
+  --color-ink: #e8eaed;
+  --color-ink-secondary: #a3aab5;
+  --color-ink-muted: #6b7280;
+
+  /* Team identity — the validated categorical slots 1 and 2. */
+  --color-team-a: #3987e5;
+  --color-team-b: #d95926;
+
+  /* Sides. CS2 convention, and the validated slots 1 and 4. */
+  --color-ct: #3987e5;
+  --color-t: #c98500;
+
+  /* Outcome. Restrained on purpose: emphasis, not decoration. */
+  --color-good: #199e70;
+  --color-bad: #e66767;
+  --color-warn: #c98500;
+
+  --font-sans:
+    ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue',
+    Arial, sans-serif;
+  --font-mono:
+    ui-monospace, 'SF Mono', 'Cascadia Mono', Menlo, Consolas, 'Liberation Mono',
+    monospace;
+}
+
+@layer base {
+  html {
+    color-scheme: dark;
+    background-color: var(--color-base);
+  }
+
+  body {
+    margin: 0;
+    background-color: var(--color-base);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Statistics are read in columns, so digits must not jitter between rows. */
+  table,
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-team-a);
+    outline-offset: 2px;
+  }
+
+  ::selection {
+    background: color-mix(in oklab, var(--color-team-a) 40%, transparent);
+  }
+
+  /* Scrollbars: present but recessive, so dense tables do not gain a bright edge. */
+  * {
+    scrollbar-color: var(--color-line-strong) transparent;
+    scrollbar-width: thin;
+  }
+}
+
+@layer components {
+  .panel {
+    background-color: var(--color-surface);
+    border: 1px solid var(--color-line);
+    border-radius: 0.5rem;
+  }
+
+  /* Dense statistical table: tight rows, right-aligned numbers, sticky header. */
+  .stat-table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    font-size: 0.8125rem;
+  }
+
+  .stat-table thead th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background-color: var(--color-surface-raised);
+    color: var(--color-ink-secondary);
+    font-weight: 500;
+    font-size: 0.6875rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    padding: 0.5rem 0.625rem;
+    text-align: right;
+    white-space: nowrap;
+    border-bottom: 1px solid var(--color-line);
+  }
+
+  .stat-table thead th:first-child,
+  .stat-table tbody td:first-child {
+    text-align: left;
+  }
+
+  .stat-table tbody td {
+    padding: 0.4375rem 0.625rem;
+    text-align: right;
+    white-space: nowrap;
+    border-bottom: 1px solid color-mix(in oklab, var(--color-line) 60%, transparent);
+  }
+
+  .stat-table tbody tr:hover {
+    background-color: var(--color-surface-hover);
+  }
+
+  .stat-table tbody tr:last-child td {
+    border-bottom: none;
+  }
+
+  /* A value we do not know. Never rendered as 0. */
+  .unknown {
+    color: var(--color-ink-muted);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# Node
+node_modules/
+frontend/dist/
+frontend/src/api/generated.ts
+
+# Application data — demos, derived DB, cached map assets, downloaded fixtures.
+# Demos contain identifiable player names and Steam IDs; never commit them.
+data/
+*.dem
+*.dem.bz2
+*.db
+*.db-wal
+*.db-shm
+
+# Local env
+.env
+.env.local
+
+# Editors / OS
+.DS_Store
+*.swp
+.idea/
+.vscode/
+
+# Browser smoke-test output
+frontend/ui-shots/
